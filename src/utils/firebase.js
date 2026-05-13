@@ -1,81 +1,112 @@
-// ──────────────────────────────────────────────────
-// Firebase Configuration
-// Replace with your Firebase project credentials
-// Get these from: https://console.firebase.google.com
-// ──────────────────────────────────────────────────
+import { initializeApp } from 'firebase/app';
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, signOut, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 
+// ─── Config from environment variables ───
+// Set these in Vercel dashboard → Settings → Environment Variables
+// Or create a .env.local file locally:
+//   VITE_FIREBASE_API_KEY=AIza...
+//   VITE_FIREBASE_AUTH_DOMAIN=yourapp.firebaseapp.com
+//   VITE_FIREBASE_PROJECT_ID=yourapp
+//   VITE_FIREBASE_STORAGE_BUCKET=yourapp.appspot.com
+//   VITE_FIREBASE_MESSAGING_SENDER_ID=123456
+//   VITE_FIREBASE_APP_ID=1:123456:web:abc
 const firebaseConfig = {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_PROJECT.firebaseapp.com',
-  projectId: 'YOUR_PROJECT_ID',
-  storageBucket: 'YOUR_PROJECT.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId: 'YOUR_APP_ID',
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-// ──────────────────────────────────────────────────
-// Firebase is NOT initialized by default.
-// To enable:
-// 1. npm install firebase
-// 2. Fill in firebaseConfig above
-// 3. Uncomment the code below
-// 4. Update useStore.js to use these functions
-// ──────────────────────────────────────────────────
+// Check if Firebase is configured
+export const FIREBASE_CONFIGURED = !!firebaseConfig.apiKey && firebaseConfig.apiKey !== 'undefined';
 
-/*
-import { initializeApp } from 'firebase/app';
-import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, signOut } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+let app, auth, db;
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// ─── Phone Auth ───
-export async function sendOTP(phoneNumber) {
-  const recaptcha = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
-  const confirmation = await signInWithPhoneNumber(auth, '+91' + phoneNumber, recaptcha);
-  return confirmation; // call confirmation.confirm(otp) to verify
+if (FIREBASE_CONFIGURED) {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  auth.languageCode = 'hi'; // Default to Hindi for Indian users
+  db = getFirestore(app);
 }
 
-export async function verifyOTP(confirmation, otp) {
-  const result = await confirmation.confirm(otp);
+// ─── Phone Auth ───
+
+// Initialize invisible reCAPTCHA (call once before sending OTP)
+export function setupRecaptcha(buttonId) {
+  if (!FIREBASE_CONFIGURED) return null;
+  if (window._recaptchaVerifier) {
+    window._recaptchaVerifier.clear();
+  }
+  window._recaptchaVerifier = new RecaptchaVerifier(auth, buttonId, {
+    size: 'invisible',
+    callback: () => {},
+    'expired-callback': () => {
+      window._recaptchaVerifier = null;
+    },
+  });
+  return window._recaptchaVerifier;
+}
+
+// Send OTP to phone number
+export async function sendOTP(phoneNumber) {
+  if (!FIREBASE_CONFIGURED) {
+    // Demo mode — simulate OTP
+    return { _demo: true, phone: phoneNumber };
+  }
+
+  const recaptcha = window._recaptchaVerifier;
+  if (!recaptcha) throw new Error('Recaptcha not initialized');
+
+  // Ensure +91 prefix for Indian numbers
+  const fullNumber = phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber.replace(/\D/g, '')}`;
+
+  const confirmation = await signInWithPhoneNumber(auth, fullNumber, recaptcha);
+  return confirmation;
+}
+
+// Verify OTP code
+export async function verifyOTP(confirmation, otpCode) {
+  if (!FIREBASE_CONFIGURED || confirmation?._demo) {
+    // Demo mode — accept any 4+ digit code
+    if (otpCode.length >= 4) {
+      return { uid: 'demo_' + Date.now(), phoneNumber: '+91' + (confirmation?.phone || '9876543210') };
+    }
+    throw new Error('Invalid OTP');
+  }
+
+  const result = await confirmation.confirm(otpCode);
   return result.user;
 }
 
+// ─── Auth State ───
+
+export function onAuthChange(callback) {
+  if (!FIREBASE_CONFIGURED) return () => {};
+  return onAuthStateChanged(auth, callback);
+}
+
 export async function logoutUser() {
+  if (!FIREBASE_CONFIGURED) return;
   await signOut(auth);
 }
 
-export function onAuthChange(callback) {
-  return auth.onAuthStateChanged(callback);
-}
+// ─── Firestore User Data ───
 
-// ─── Firestore CRUD ───
 export async function saveUserData(uid, data) {
-  await setDoc(doc(db, 'users', uid), data, { merge: true });
+  if (!FIREBASE_CONFIGURED) return;
+  await setDoc(doc(db, 'users', uid), {
+    ...data,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
 }
 
 export async function getUserData(uid) {
+  if (!FIREBASE_CONFIGURED) return null;
   const snap = await getDoc(doc(db, 'users', uid));
   return snap.exists() ? snap.data() : null;
 }
 
-// ─── Firestore Security Rules ───
-// Paste this in Firebase Console → Firestore → Rules:
-//
-// rules_version = '2';
-// service cloud.firestore {
-//   match /databases/{database}/documents {
-//     match /users/{userId} {
-//       allow read, write: if request.auth != null && request.auth.uid == userId;
-//     }
-//   }
-// }
-
 export { auth, db };
-*/
-
-// Export placeholder for now
-export const FIREBASE_READY = false;
-export default firebaseConfig;

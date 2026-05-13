@@ -5,15 +5,10 @@
 @tailwind utilities;
 
 @layer base {
-  * { -webkit-font-smoothing: antialiased; }
-  html, body, #root {
-    height: 100%;
-    overscroll-behavior: none;
-  }
-  body {
-    background: #FAF5EF;
-    -webkit-tap-highlight-color: transparent;
-  }
+  * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  html, body, #root { height: 100%; overscroll-behavior: none; }
+  body { background: #FAF5EF; -webkit-tap-highlight-color: transparent; }
+
   *:focus-visible {
     outline: 2px solid theme('colors.terra.DEFAULT');
     outline-offset: 2px;
@@ -26,23 +21,80 @@
   .phone-frame * { scrollbar-width: none; }
   .phone-frame::-webkit-scrollbar, .phone-frame *::-webkit-scrollbar { display: none; }
 
-  .btn-primary {
-    @apply py-3 rounded-xl border-none text-sm font-bold text-white cursor-pointer bg-terra;
-    font-family: 'DM Sans', sans-serif;
+  /* Premium gradient backgrounds */
+  .bg-aub-gradient {
+    background: linear-gradient(165deg, #221830 0%, #1B1425 40%, #150F1E 100%);
   }
+  .bg-aub-gradient-deep {
+    background: linear-gradient(180deg, #1E1530 0%, #130E1B 60%, #0D0A12 100%);
+  }
+
+  /* Glass card */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(20px);
+    box-shadow:
+      0 4px 24px rgba(27, 20, 37, 0.08),
+      0 1px 3px rgba(27, 20, 37, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(232, 224, 214, 0.5);
+  }
+
+  /* Input glow on focus */
+  .input-glow {
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .input-glow:focus-within {
+    border-color: theme('colors.terra.DEFAULT');
+    box-shadow: 0 0 0 3px rgba(212, 88, 59, 0.1);
+  }
+
+  /* Button styles */
+  .btn-primary {
+    @apply py-3.5 rounded-xl text-[14px] font-bold text-white cursor-pointer bg-terra border-none;
+    font-family: 'DM Sans', sans-serif;
+    box-shadow: 0 2px 12px rgba(212, 88, 59, 0.25);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 4px 20px rgba(212, 88, 59, 0.35);
+    transform: translateY(-0.5px);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0.5px);
+    box-shadow: 0 1px 6px rgba(212, 88, 59, 0.2);
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: default;
+    box-shadow: none;
+  }
+
   .btn-ghost {
     @apply py-3 rounded-xl text-sm font-semibold text-txt cursor-pointer bg-white border border-bdr;
     font-family: 'DM Sans', sans-serif;
+    transition: all 0.15s;
   }
+  .btn-ghost:hover { background: #F8F4EE; }
+  .btn-ghost:active { transform: scale(0.98); }
+
   .btn-danger {
     @apply py-3 rounded-xl border-none text-sm font-bold text-white cursor-pointer bg-danger;
     font-family: 'DM Sans', sans-serif;
+    box-shadow: 0 2px 12px rgba(201, 66, 63, 0.2);
   }
+
   .day-label {
     @apply px-4 py-1.5 text-[10px] font-bold text-terra uppercase tracking-wide;
   }
 
-  /* Safe area for notched phones */
+  /* Safe area */
   .safe-top { padding-top: env(safe-area-inset-top); }
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+  /* Responsive text */
+  @media (max-width: 374px) {
+    .text-responsive-xl { font-size: 18px; }
+    .text-responsive-2xl { font-size: 22px; }
+  }
 }

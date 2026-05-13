@@ -3,17 +3,16 @@ import translations from '../data/translations';
 import { getDefaultExpenses, DEFAULT_GOALS } from '../data/defaults';
 import { today, formatTime, filterByMonth, currentMonth, offsetMonth } from '../utils/dates';
 import { generateRecurring } from '../utils/recurring';
+import { FIREBASE_CONFIGURED, saveUserData, getUserData } from '../utils/firebase';
 import storage from '../utils/storage';
 
 const STORAGE_KEY = 'gb_d';
 
-export default function useStore() {
+export default function useStore(authUser) {
   const saved = useRef(storage.get(STORAGE_KEY)).current;
 
   const [lang, setLangState]              = useState(saved?.lang || 'hi');
-  const [loggedIn, setLoggedIn]           = useState(saved?.loggedIn || false);
   const [onboarded, setOnboarded]         = useState(saved?.onboarded || false);
-  const [phoneNum, setPhoneNum]           = useState(saved?.phoneNum || '');
   const [expenses, setExpenses]           = useState(saved?.expenses || getDefaultExpenses());
   const [goals, setGoals]                 = useState(saved?.goals || structuredClone(DEFAULT_GOALS));
   const [monthlyIncome, setIncomeRaw]     = useState(saved?.monthlyIncome || 25000);
@@ -21,12 +20,36 @@ export default function useStore() {
   const [recurring, setRecurring]         = useState(saved?.recurring || []);
   const [nid, setNid]                     = useState(saved?.nid || 7);
   const [gid, setGid]                     = useState(saved?.gid || 4);
+  const [synced, setSynced] = useState(false);
 
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
 
-  // Auto-generate recurring expenses on load
+  // Load data from Firestore on first auth
   useEffect(() => {
-    if (!loggedIn || recurring.length === 0) return;
+    if (!authUser || synced) return;
+    (async () => {
+      if (FIREBASE_CONFIGURED) {
+        try {
+          const cloud = await getUserData(authUser.uid);
+          if (cloud && cloud.expenses && cloud.expenses.length > 0) {
+            setExpenses(cloud.expenses);
+            setGoals(cloud.goals || structuredClone(DEFAULT_GOALS));
+            setIncomeRaw(cloud.monthlyIncome || 25000);
+            setCatBudgets(cloud.categoryBudgets || {});
+            setRecurring(cloud.recurring || []);
+            setNid(cloud.nid || 7);
+            setGid(cloud.gid || 4);
+            if (cloud.lang) setLangState(cloud.lang);
+          }
+        } catch {}
+      }
+      setSynced(true);
+    })();
+  }, [authUser, synced]);
+
+  // Auto-generate recurring expenses
+  useEffect(() => {
+    if (!authUser || recurring.length === 0) return;
     const newExps = generateRecurring(recurring, expenses);
     if (newExps.length > 0) {
       const updated = [...newExps.map((e, i) => ({ ...e, id: nid + i, time: '12:00 AM' })), ...expenses];
@@ -34,33 +57,24 @@ export default function useStore() {
       setNid(nid + newExps.length);
       persist({ expenses: updated, nid: nid + newExps.length });
     }
-  }, [loggedIn]); // Only on login/mount
+  }, [authUser?.uid]);
 
   const persist = useCallback((overrides = {}) => {
-    storage.set(STORAGE_KEY, { lang, loggedIn, onboarded, phoneNum, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid, ...overrides });
-  }, [lang, loggedIn, onboarded, phoneNum, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid]);
+    const data = { lang, onboarded, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid, ...overrides };
+    storage.set(STORAGE_KEY, data);
+    // Also sync to Firestore
+    if (FIREBASE_CONFIGURED && authUser) {
+      saveUserData(authUser.uid, data).catch(() => {});
+    }
+  }, [lang, onboarded, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid, authUser]);
 
   const t = useCallback((key) => translations[lang]?.[key] || translations.en[key], [lang]);
 
-  // ─── Auth ───
+  // ─── Onboarding ───
   const completeOnboarding = useCallback(() => {
     setOnboarded(true);
-    storage.set(STORAGE_KEY, { lang, loggedIn, onboarded: true, phoneNum, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid });
-  }, [lang, loggedIn, phoneNum, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid]);
-
-  const login = useCallback((phone) => {
-    setLoggedIn(true); setPhoneNum(phone);
-    storage.set(STORAGE_KEY, { lang, loggedIn: true, onboarded, phoneNum: phone, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid });
-  }, [lang, onboarded, expenses, goals, monthlyIncome, categoryBudgets, recurring, nid, gid]);
-
-  const logout = useCallback(() => {
-    setLoggedIn(false); setPhoneNum('');
-    const fresh = getDefaultExpenses();
-    const freshG = structuredClone(DEFAULT_GOALS);
-    setExpenses(fresh); setGoals(freshG); setNid(7); setGid(4);
-    setCatBudgets({}); setRecurring([]);
-    storage.del(STORAGE_KEY);
-  }, []);
+    persist({ onboarded: true });
+  }, [persist]);
 
   // ─── Language ───
   const setLang = useCallback((code) => {
@@ -157,7 +171,7 @@ export default function useStore() {
     URL.revokeObjectURL(url);
   }, [expenses]);
 
-  // ─── Month-filtered computed values ───
+  // ─── Computed ───
   const getMonthData = useCallback((month) => {
     const filtered = filterByMonth(expenses, month);
     const total = filtered.reduce((s, e) => s + e.amount, 0);
@@ -166,23 +180,20 @@ export default function useStore() {
     return { expenses: filtered, total, categoryTotals };
   }, [expenses]);
 
-  // ─── Last 6 months trend data ───
   const getTrendData = useCallback(() => {
     const cm = currentMonth();
     const months = [];
+    const monthLabels = { '01':'J','02':'F','03':'M','04':'A','05':'M','06':'J','07':'J','08':'A','09':'S','10':'O','11':'N','12':'D' };
     for (let i = 5; i >= 0; i--) {
       const m = i === 0 ? cm : offsetMonth(cm, -i);
       const { total } = getMonthData(m);
-      const shortMonth = translations[lang]?.cats ? m.split('-')[1] : m.split('-')[1];
-      const monthNames = { '01':'J','02':'F','03':'M','04':'A','05':'M','06':'J','07':'J','08':'A','09':'S','10':'O','11':'N','12':'D' };
-      months.push({ month: m, total, label: monthNames[m.split('-')[1]] || m.split('-')[1] });
+      months.push({ month: m, total, label: monthLabels[m.split('-')[1]] || m.split('-')[1] });
     }
     return months;
-  }, [getMonthData, lang]);
+  }, [getMonthData]);
 
   return {
     lang, setLang, t,
-    loggedIn, phoneNum, login, logout,
     onboarded, completeOnboarding,
     expenses, addExpense, editExpense, deleteExpense,
     goals, addGoal, depositGoal, deleteGoal,
@@ -191,5 +202,6 @@ export default function useStore() {
     recurring, addRecurring, removeRecurring,
     getMonthData, getTrendData,
     resetAll, exportCSV,
+    phoneNum: authUser?.phoneNumber?.replace('+91', '') || '',
   };
 }
