@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
@@ -26,25 +27,8 @@ const pageTransition = {
 export default function App() {
   const auth = useAuth();
   const store = useStore(auth.user);
-  const [tab, setTab] = useState(0);
-  const [showAdd, setShowAdd] = useState(false);
-  const [showLanding, setShowLanding] = useState(true);
 
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') setShowAdd(false); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, []);
-
-  // Skip landing if already logged in or has visited before
-  useEffect(() => {
-    if (auth.user || store.onboarded) setShowLanding(false);
-  }, [auth.user, store.onboarded]);
-
-  const goTab = (i) => { setTab(i); setShowAdd(false); };
-  const goToLogin = () => setShowLanding(false);
-
-  // ─── Loading ───
+  // ─── Loading (checking auth state) ───
   if (auth.loading) {
     return (
       <Shell hidePadding>
@@ -60,20 +44,62 @@ export default function App() {
     );
   }
 
-  // ─── Landing Page (full-page, outside the phone shell) ───
-  if (showLanding && !auth.user) {
-    return (
-      <>
-        <LandingPage onGetStarted={goToLogin} onLogin={goToLogin} />
-        <ToastProvider />
-        <SpeedInsights />
-        <Analytics />
-      </>
-    );
-  }
+  return (
+    <Routes>
+      {/* / → Landing page (public) */}
+      <Route path="/" element={
+        auth.user
+          ? <Navigate to="/app" replace />
+          : <LandingLayout />
+      } />
 
-  // ─── Onboarding ───
-  if (!store.onboarded && !auth.user) {
+      {/* /login → OTP login (public, redirects if logged in) */}
+      <Route path="/login" element={
+        auth.user
+          ? <Navigate to="/app" replace />
+          : <LoginLayout auth={auth} store={store} />
+      } />
+
+      {/* /app → Dashboard (protected) */}
+      <Route path="/app" element={
+        auth.user
+          ? <DashboardLayout auth={auth} store={store} />
+          : <Navigate to="/" replace />
+      } />
+
+      {/* Catch-all → redirect to landing */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+// ─── Landing (full-page, no phone shell) ───
+function LandingLayout() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <LandingPage
+        onGetStarted={() => navigate('/login')}
+        onLogin={() => navigate('/login')}
+      />
+      <ToastProvider />
+      <SpeedInsights />
+      <Analytics />
+    </>
+  );
+}
+
+// ─── Login + Onboarding (phone shell) ───
+function LoginLayout({ auth, store }) {
+  const navigate = useNavigate();
+
+  // Redirect to /app after successful login
+  useEffect(() => {
+    if (auth.user) navigate('/app', { replace: true });
+  }, [auth.user, navigate]);
+
+  // Show onboarding first if not completed
+  if (!store.onboarded) {
     return (
       <Shell>
         <OnboardingScreen lang={store.lang} onComplete={store.completeOnboarding} />
@@ -81,17 +107,45 @@ export default function App() {
     );
   }
 
-  // ─── Login ───
-  if (!auth.user) {
-    return (
-      <Shell>
-        <LoginScreen t={store.t} lang={store.lang} setLang={store.setLang} auth={auth} showToast={toast.info} />
-      </Shell>
-    );
-  }
+  return (
+    <Shell>
+      <LoginScreen
+        t={store.t}
+        lang={store.lang}
+        setLang={store.setLang}
+        auth={auth}
+        showToast={toast.info}
+      />
+    </Shell>
+  );
+}
 
-  // ─── Main app ───
-  const storeWithLogout = { ...store, logout: auth.logout };
+// ─── Dashboard (phone shell, protected) ───
+function DashboardLayout({ auth, store }) {
+  const [tab, setTab] = useState(0);
+  const [showAdd, setShowAdd] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') setShowAdd(false); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  // Redirect to landing on logout
+  useEffect(() => {
+    if (!auth.user) navigate('/', { replace: true });
+  }, [auth.user, navigate]);
+
+  const goTab = (i) => { setTab(i); setShowAdd(false); };
+
+  const storeWithLogout = {
+    ...store,
+    logout: () => {
+      auth.logout();
+      navigate('/', { replace: true });
+    },
+  };
 
   const renderScreen = () => {
     if (showAdd) return <AddExpenseScreen key="add" store={store} onBack={() => setShowAdd(false)} showToast={toast.success} />;
@@ -119,6 +173,7 @@ export default function App() {
   );
 }
 
+// ─── Shell (phone frame wrapper) ───
 function Shell({ children, hidePadding = false }) {
   return (
     <div role="application" aria-label="Gha₹Budget App"
